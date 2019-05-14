@@ -1,4 +1,4 @@
-{-# LANGUAGE LambdaCase, TemplateHaskell #-}
+{-# LANGUAGE LambdaCase, TemplateHaskell, DeriveGeneric, FlexibleInstances #-}
 {-# OPTIONS_GHC -fno-warn-type-defaults #-}
 {-|
 Module      : PostgREST.Config
@@ -31,9 +31,9 @@ import           Crypto.JWT                   (StringOrURI,
 import qualified Data.ByteString              as B
 import qualified Data.ByteString.Char8        as BS
 import qualified Data.CaseInsensitive         as CI
-import qualified Data.Configurator            as C
-import qualified Data.Configurator.Parser     as C
-import           Data.Configurator.Types      as C
+-- import qualified Data.Configurator            as C
+-- import qualified Data.Configurator.Parser     as C
+-- import           Data.Configurator.Types      as C
 import           Data.List                    (lookup)
 import           Data.Monoid
 import           Data.Scientific              (floatingOrInteger)
@@ -47,18 +47,27 @@ import           Data.Version                 (versionBranch)
 import           Development.GitRev           (gitHash)
 import           Network.Wai
 import           Network.Wai.Middleware.Cors  (CorsResourcePolicy (..))
-import           Options.Applicative          hiding (str)
 import           Paths_postgrest              (version)
 import           PostgREST.Parsers            (pRoleClaimKey)
 import           PostgREST.Types              (ApiRequestError(..),
                                                JSPath, JSPathExp(..))
 import           Protolude                    hiding (hPutStrLn, take,
-                                               intercalate, (<>))
+                                               intercalate, (<>), Type)
 import           System.IO                    (hPrint)
 import           System.IO.Error              (IOError)
 import           Text.Heredoc
 import           Text.PrettyPrint.ANSI.Leijen hiding ((<$>), (<>))
 import qualified Text.PrettyPrint.ANSI.Leijen as L
+
+import Options.Applicative (
+    Parser, ParserInfo
+  , customExecParser
+  , info, help, fullDesc, progDesc, footerDoc
+  , metavar, showHelpOnError, prefs, helper, strArgument
+  )
+
+import Data.Maybe (fromJust)
+import Dhall (Interpret(..), Type, input, auto)
 
 -- | Config file settings for the server
 data AppConfig = AppConfig {
@@ -81,7 +90,17 @@ data AppConfig = AppConfig {
   , configSettings          :: [(Text, Text)]
   , configRoleClaimKey      :: Either ApiRequestError JSPath
   , configExtraSearchPath   :: [Text]
-  }
+  } deriving (Generic, Show)
+
+instance Interpret AppConfig
+instance Interpret Int where
+  autoWith opt = (fromIntegral::Integer -> Int)  <$> autoWith opt
+instance Interpret B.ByteString where
+  autoWith opt = (toS :: Text -> B.ByteString) <$> autoWith opt
+instance Interpret StringOrURI where
+  autoWith opt = (fromJust . preview stringOrUri :: Text -> StringOrURI) <$> autoWith opt
+instance Interpret (Either ApiRequestError JSPath) where
+  autoWith opt = (pRoleClaimKey :: Text -> Either ApiRequestError JSPath) <$> autoWith opt
 
 configPoolTimeout' :: (Fractional a) => AppConfig -> a
 configPoolTimeout' =
@@ -121,130 +140,153 @@ prettyVersion =
 docsVersion :: Text
 docsVersion = "v" <> dropEnd 1 (dropWhileEnd (/= '.') prettyVersion)
 
--- | Function to read and parse options from the command line
 readOptions :: IO AppConfig
 readOptions = do
   -- First read the config file path from command line
-  cfgPath <- customExecParser parserPrefs opts
-  -- Now read the actual config file
-  conf <- catch
-    (C.readConfig =<< C.load [C.Required cfgPath])
-    configNotfoundHint
+  cfgPath <- customExecParser (prefs showHelpOnError) progOpts
+  input auto (toS cfgPath)
 
-  let (mAppConf, errs) = flip C.runParserM conf $
-        AppConfig
-          <$> C.key "db-uri"
-          <*> C.key "db-anon-role"
-          <*> (mfilter (/= "") <$> C.key "server-proxy-uri")
-          <*> C.key "db-schema"
-          <*> (fromMaybe "127.0.0.1" . mfilter (/= "") <$> C.key "server-host")
-          <*> (fromMaybe 3000 . join . fmap coerceInt <$> C.key "server-port")
-          <*> (fmap encodeUtf8 . mfilter (/= "") <$> C.key "jwt-secret")
-          <*> (fromMaybe False . join . fmap coerceBool <$> C.key "secret-is-base64")
-          <*> parseJwtAudience "jwt-aud"
-          <*> (fromMaybe 10 . join . fmap coerceInt <$> C.key "db-pool")
-          <*> (fromMaybe 10 . join . fmap coerceInt <$> C.key "db-pool-timeout")
-          <*> (join . fmap coerceInt <$> C.key "max-rows")
-          <*> (mfilter (/= "") <$> C.key "pre-request")
-          <*> pure False
-          <*> (fmap (fmap coerceText) <$> C.subassocs "app.settings")
-          <*> (maybe (Right [JSPKey "role"]) parseRoleClaimKey <$> C.key "role-claim-key")
-          <*> (maybe ["public"] splitExtraSearchPath <$> C.key "db-extra-search-path")
+-- | Function to read and parse options from the command line
+--readOptions :: IO AppConfig
+--readOptions = do
+--  
+--  cfgPath <- customExecParser parserPrefs opts
+--  -- Now read the actual config file
+--  conf <- catch
+--    (C.readConfig =<< C.load [C.Required cfgPath])
+--    configNotfoundHint
+--
+--  let (mAppConf, errs) = flip C.runParserM conf $
+--        AppConfig
+--          <$> C.key "db-uri"
+--          <*> C.key "db-anon-role"
+--          <*> (mfilter (/= "") <$> C.key "server-proxy-uri")
+--          <*> C.key "db-schema"
+--          <*> (fromMaybe "127.0.0.1" . mfilter (/= "") <$> C.key "server-host")
+--          <*> (fromMaybe 3000 . join . fmap coerceInt <$> C.key "server-port")
+--          <*> (fmap encodeUtf8 . mfilter (/= "") <$> C.key "jwt-secret")
+--          <*> (fromMaybe False . join . fmap coerceBool <$> C.key "secret-is-base64")
+--          <*> parseJwtAudience "jwt-aud"
+--          <*> (fromMaybe 10 . join . fmap coerceInt <$> C.key "db-pool")
+--          <*> (fromMaybe 10 . join . fmap coerceInt <$> C.key "db-pool-timeout")
+--          <*> (join . fmap coerceInt <$> C.key "max-rows")
+--          <*> (mfilter (/= "") <$> C.key "pre-request")
+--          <*> pure False
+--          <*> (fmap (fmap coerceText) <$> C.subassocs "app.settings")
+--          <*> (maybe (Right [JSPKey "role"]) parseRoleClaimKey <$> C.key "role-claim-key")
+--          <*> (maybe ["public"] splitExtraSearchPath <$> C.key "db-extra-search-path")
+--
+--  case mAppConf of
+--    Nothing -> do
+--      forM_ errs $ hPrint stderr
+--      exitFailure
+--    Just appConf ->
+--      return appConf
+--
+--  where
+--    parseJwtAudience :: Name -> C.ConfigParserM (Maybe StringOrURI)
+--    parseJwtAudience k =
+--      C.key k >>= \case
+--        Nothing -> pure Nothing -- no audience in config file
+--        Just aud -> case preview stringOrUri (aud :: String) of
+--          Nothing -> fail "Invalid Jwt audience. Check your configuration."
+--          (Just "") -> pure Nothing
+--          aud' -> pure aud'
+--
+--    coerceText :: Value -> Text
+--    coerceText (String s) = s
+--    coerceText v = show v
+--
+--    coerceInt :: (Read i, Integral i) => Value -> Maybe i
+--    coerceInt (Number x) = rightToMaybe $ floatingOrInteger x
+--    coerceInt (String x) = readMaybe $ toS x
+--    coerceInt _          = Nothing
+--
+--    coerceBool :: Value -> Maybe Bool
+--    coerceBool (Bool b)   = Just b
+--    coerceBool (String b) = readMaybe $ toS b
+--    coerceBool _          = Nothing
+--
+--    parseRoleClaimKey :: Value -> Either ApiRequestError JSPath
+--    parseRoleClaimKey (String s) = pRoleClaimKey s
+--    parseRoleClaimKey v = pRoleClaimKey $ show v
+--
+--    splitExtraSearchPath :: Value -> [Text]
+--    splitExtraSearchPath (String s) = strip <$> splitOn "," s
+--    splitExtraSearchPath _ = []
+--
+--
+--    parserPrefs = prefs showHelpOnError
+--
+--    configNotfoundHint :: IOError -> IO a
+--    configNotfoundHint e = do
+--      hPutStrLn stderr $
+--        "Cannot open config file:\n\t" <> show e
+--      exitFailure
+--
+--
 
-  case mAppConf of
-    Nothing -> do
-      forM_ errs $ hPrint stderr
-      exitFailure
-    Just appConf ->
-      return appConf
 
-  where
-    parseJwtAudience :: Name -> C.ConfigParserM (Maybe StringOrURI)
-    parseJwtAudience k =
-      C.key k >>= \case
-        Nothing -> pure Nothing -- no audience in config file
-        Just aud -> case preview stringOrUri (aud :: String) of
-          Nothing -> fail "Invalid Jwt audience. Check your configuration."
-          (Just "") -> pure Nothing
-          aud' -> pure aud'
-
-    coerceText :: Value -> Text
-    coerceText (String s) = s
-    coerceText v = show v
-
-    coerceInt :: (Read i, Integral i) => Value -> Maybe i
-    coerceInt (Number x) = rightToMaybe $ floatingOrInteger x
-    coerceInt (String x) = readMaybe $ toS x
-    coerceInt _          = Nothing
-
-    coerceBool :: Value -> Maybe Bool
-    coerceBool (Bool b)   = Just b
-    coerceBool (String b) = readMaybe $ toS b
-    coerceBool _          = Nothing
-
-    parseRoleClaimKey :: Value -> Either ApiRequestError JSPath
-    parseRoleClaimKey (String s) = pRoleClaimKey s
-    parseRoleClaimKey v = pRoleClaimKey $ show v
-
-    splitExtraSearchPath :: Value -> [Text]
-    splitExtraSearchPath (String s) = strip <$> splitOn "," s
-    splitExtraSearchPath _ = []
-
-    opts = info (helper <*> pathParser) $
-             fullDesc
-             <> progDesc (
-                 "PostgREST "
-                 <> toS prettyVersion
-                 <> " / create a REST API to an existing Postgres database"
-               )
-             <> footerDoc (Just $
-                 text "Example Config File:"
-                 L.<> nest 2 (hardline L.<> exampleCfg)
-               )
-
-    parserPrefs = prefs showHelpOnError
-
-    configNotfoundHint :: IOError -> IO a
-    configNotfoundHint e = do
-      hPutStrLn stderr $
-        "Cannot open config file:\n\t" <> show e
-      exitFailure
-
-    exampleCfg :: Doc
-    exampleCfg = vsep . map (text . toS) . lines $
-      [str|db-uri = "postgres://user:pass@localhost:5432/dbname"
-          |db-schema = "public" # this schema gets added to the search_path of every request
-          |db-anon-role = "postgres"
-          |db-pool = 10
-          |db-pool-timeout = 10
-          |
-          |server-host = "127.0.0.1"
-          |server-port = 3000
-          |
-          |## base url for swagger output
-          |# server-proxy-uri = ""
-          |
-          |## choose a secret, JSON Web Key (or set) to enable JWT auth
-          |## (use "@filename" to load from separate file)
-          |# jwt-secret = "foo"
-          |# secret-is-base64 = false
-          |# jwt-aud = "your_audience_claim"
-          |
-          |## limit rows in response
-          |# max-rows = 1000
-          |
-          |## stored proc to exec immediately after auth
-          |# pre-request = "stored_proc_name"
-          |
-          |## jspath to the role claim key
-          |# role-claim-key = ".role"
-          |
-          |## extra schemas to add to the search_path of every request
-          |# db-extra-search-path = "extensions, util"
-          |]
+exampleCfg :: Text
+exampleCfg = 
+  [str|{
+      |    db-uri = ""
+      |  , db-anon-role = ""
+      |  , server-proxy-uri = None Text
+      |    {-- this schema gets added to the search_path of every request --}
+      |  , db-schema = "public"
+      |  , server-host = "127.0.0.1"
+      |  , server-port = +3000
+      |
+      |  , jwt-secret = ""
+      |  , secret-is-base64 = ""
+      |  , jwt-aud = ""
+      |
+      |  , db-pool = 10
+      |  , db-pool-timeout = 10
+      |  , max-rows = Optional +1000
+      |  , pre-request = ""
+      |  , quiet = False
+      |  , app.settings = ""
+      |  , role-claim-key = ""
+      |  , db-extra-search-path = ""
+      |} // {
+      |    db-uri = "postgres://user:pass@localhost:5432/dbname"
+      |    
+      |## choose a secret, JSON Web Key (or set) to enable JWT auth
+      |## (use "@filename" to load from separate file)
+      |# jwt-secret = "foo"
+      |# secret-is-base64 = false
+      |# jwt-aud = "your_audience_claim"
+      |
+      |## limit rows in response
+      |# max-rows = 1000
+      |
+      |## stored proc to exec immediately after auth
+      |# pre-request = "stored_proc_name"
+      |
+      |## jspath to the role claim key
+      |# role-claim-key = ".role"
+      |
+      |## extra schemas to add to the search_path of every request
+      |# db-extra-search-path = "extensions, util"
+      |]
 
 pathParser :: Parser FilePath
 pathParser =
   strArgument $
     metavar "FILENAME" <>
     help "Path to configuration file"
+
+progOpts :: ParserInfo FilePath
+progOpts = info (helper <*> pathParser) $
+         fullDesc
+         <> progDesc (
+             "PostgREST "
+             <> toS prettyVersion
+             <> " / create a REST API to an existing Postgres database"
+           )
+         <> footerDoc (Just $
+             text "Example Config File:"
+             L.<> nest 2 (hardline L.<> (vsep . map (text . toS) . lines $ exampleCfg))
+           )

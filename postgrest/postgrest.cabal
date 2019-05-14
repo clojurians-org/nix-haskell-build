@@ -23,7 +23,7 @@ Flag CI
   Manual:      True
   Default:     False
 
-executable postgrest
+executable postgrest-exe
   main-is:             Main.hs
   default-extensions:  OverloadedStrings, QuasiQuotes, NoImplicitPrelude
   ghc-options:
@@ -60,7 +60,9 @@ library
                      , case-insensitive
                      , cassava
 --                      , configurator-ng
+                     , optparse-applicative
                      , dhall
+--
                      , containers
                      , contravariant
                      , contravariant-extras
@@ -110,68 +112,3 @@ library
                      , PostgREST.RangeQuery
                      , PostgREST.Types
   hs-source-dirs:      src
-
-Test-Suite spec
-  Type:                exitcode-stdio-1.0
-  Default-Language:    Haskell2010
-  default-extensions:  OverloadedStrings, QuasiQuotes, NoImplicitPrelude
-  ghc-options:         -threaded -rtsopts -with-rtsopts=-N
-  Hs-Source-Dirs:      test
-  Main-Is:             Main.hs
-  Other-Modules:       Feature.AudienceJwtSecretSpec
-                     , Feature.AuthSpec
-                     , Feature.AsymmetricJwtSpec
-                     , Feature.BinaryJwtSecretSpec
-                     , Feature.ConcurrentSpec
-                     , Feature.CorsSpec
-                     , Feature.DeleteSpec
-                     , Feature.ExtraSearchPathSpec
-                     , Feature.InsertSpec
-                     , Feature.JsonOperatorSpec
-                     , Feature.NoJwtSpec
-                     , Feature.PgVersion95Spec
-                     , Feature.PgVersion96Spec
-                     , Feature.ProxySpec
-                     , Feature.QueryLimitedSpec
-                     , Feature.QuerySpec
-                     , Feature.RangeSpec
-                     , Feature.SingularSpec
-                     , Feature.StructureSpec
-                     , Feature.UnicodeSpec
-                     , Feature.AndOrParamsSpec
-                     , Feature.RpcSpec
-                     , Feature.NonexistentSchemaSpec
-                     , Feature.UpsertSpec
-                     , SpecHelper
-                     , TestTypes
-  Build-Depends:       aeson
-                     , aeson-qq
-                     , async
-                     , auto-update
-                     , base
-                     , bytestring
-                     , base64-bytestring
-                     , case-insensitive
-                     , cassava
-                     , containers
-                     , contravariant
-                     , hasql
-                     , hasql-pool
-                     , hasql-transaction
-                     , heredoc
-                     , hjsonschema
-                     , hspec
-                     , hspec-wai
-                     , hspec-wai-json
-                     , http-types
-                     , lens
-                     , lens-aeson
-                     , monad-control
-                     , postgrest
-                     , process
-                     , protolude
-                     , regex-tdfa
-                     , time
-                     , transformers-base
-                     , wai
-                     , wai-extra
