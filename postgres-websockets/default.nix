@@ -9,6 +9,7 @@
 with pkgs;
 let
   postgresql_static = pkgs.postgresql.overrideAttrs (old: { dontDisableStatic = true; });
+  openssl_static = pkgs.openssl.override { static = true; };
   haskellPackages = pkgs.haskellPackages.override {
     overrides = self: super: with pkgs.haskell.lib; {
       hasql-pool = dontCheck (doJailbreak super.hasql-pool) ;
@@ -54,15 +55,28 @@ let
           rev = "1.0.1.3" ;
           sha256 = "126ac172mn5jrry5vdny64ca8wwqvg7mhqkayglnp0fy273vbynh" ;
         }) {})) ;
+      postgresql-libpq = super.postgresql-libpq.override { postgresql = postgresql_static; };
 
     } ;
   } ;
 in haskellPackages.developPackage {
     root = ./.;
 
-    modifier = drv: haskell.lib.overrideCabal drv (attrs: {
-      buildTools = (attrs.buildTools or []) ++ [haskellPackages.cabal-install] ;
-      executableSystemDepends = [ postgresql_static ] ;
+    modifier = drv: haskell.lib.overrideCabal 
+                      # (haskell.lib.appendConfigureFlag drv ["--ld-option=--start-group"])
+                      drv
+                      (old: {
+      buildTools = (old.buildTools or []) ++ [haskellPackages.cabal-install] ;
+      # executableSystemDepends = [ openssl_static postgresql_static.lib postgresql_static ] ;
+      preConfigure = builtins.concatStringsSep "\n" [
+        (old.preConfigure or "")
+        ''
+          set -e
+          echo "larluo->" $(pkg-config --static --libs openssl)
+          configureFlags+=$(for flag in $(pkg-config --static --libs openssl); do echo -n " --ld-option=$flag"; done)
+        ''
+      ];
+      libraryPkgconfigDepends = (old.libraryPkgconfigDepends or []) ++ [openssl_static] ;
 
       isLibrary = false;
       isExecutable = true;
@@ -73,7 +87,6 @@ in haskellPackages.developPackage {
           "--ghc-option=-optl=-pthread"
           "--extra-lib-dirs=${pkgs.gmp6.override { withStatic = true; }}/lib"
           "--extra-lib-dirs=${pkgs.zlib.static}/lib"
-          "--extra-lib-dirs=${postgresql_static}/lib"
           "--disable-executable-stripping"
       ];
 
