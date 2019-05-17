@@ -4,14 +4,18 @@
 # nix-channel --update nixpkgs-static
 # export NIX_PATH=~/.nix-defexpr/channels
 # 0ihr0av55kfg36igb1dn5q132q4gnyaf041xqi4rw7n67525qdap
-{ nixpkgs ? (import <nixpkgs-static> {}).pkgsMusl } :
+{ nixpkgs ? (import <nixpkgs-static> {
+              config.packageOverrides = pkgs: rec {
+                nix = pkgs.nix.overrideDerivation (old: {
+                  doInstallCheck = false ;
+                }) ;
+              } ;
+            }).pkgsMusl} :
+
 with nixpkgs;
 let
   openssl_static = pkgs.openssl.override { static = true; };
-  postgresql_static = pkgs.postgresql.overrideAttrs (old: { 
-    dontDisableStatic = true; 
-    buildInputs = [ zlib readline openssl_static libxml2 makeWrapper libossp_uuid icu ];
-  });
+  postgresql_static = pkgs.postgresql.overrideAttrs (old: { dontDisableStatic = true; });
   haskellPackages = pkgs.haskellPackages.override {
     overrides = self: super: with pkgs.haskell.lib; {
       hasql-pool = dontCheck (doJailbreak super.hasql-pool) ;
