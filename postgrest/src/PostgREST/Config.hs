@@ -14,14 +14,15 @@ turned in configurable behaviour if needed.
 
 Other hardcoded options such as the minimum version number also belong here.
 -}
-module PostgREST.Config ( prettyVersion
-                        , docsVersion
-                        , readOptions
-                        , corsPolicy
-                        , AppConfig (..)
-                        , configPoolTimeout'
-                        )
-       where
+-- module PostgREST.Config ( prettyVersion
+--                         , docsVersion
+--                         , readOptions
+--                         , corsPolicy
+--                         , AppConfig (..)
+--                         , configPoolTimeout'
+--                         )
+--        where
+module PostgREST.Config where
 
 import           Control.Applicative
 import           Control.Monad                (fail)
@@ -59,6 +60,8 @@ import           Text.Heredoc
 import           Text.PrettyPrint.ANSI.Leijen hiding ((<$>), (<>))
 import qualified Text.PrettyPrint.ANSI.Leijen as L
 
+import GHC.Natural (Natural)
+
 import Options.Applicative (
     Parser, ParserInfo
   , customExecParser
@@ -67,6 +70,7 @@ import Options.Applicative (
   )
 
 import Data.Maybe (fromJust)
+import Dhall
 import Dhall (Interpret(..), Type, input, auto)
 
 -- | Config file settings for the server
@@ -76,14 +80,14 @@ data AppConfig = AppConfig {
   , configProxyUri          :: Maybe Text
   , configSchema            :: Text
   , configHost              :: Text
-  , configPort              :: Int
+  , configPort              :: Natural
 
   , configJwtSecret         :: Maybe B.ByteString
   , configJwtSecretIsBase64 :: Bool
   , configJwtAudience       :: Maybe StringOrURI
 
-  , configPool              :: Int
-  , configPoolTimeout       :: Int
+  , configPool              :: Natural
+  , configPoolTimeout       :: Natural
   , configMaxRows           :: Maybe Integer
   , configReqCheck          :: Maybe Text
   , configQuiet             :: Bool
@@ -226,7 +230,6 @@ readOptions = do
 --
 --
 
-
 exampleCfg :: Text
 exampleCfg = 
   [str|{
@@ -236,40 +239,39 @@ exampleCfg =
       |    {-- this schema gets added to the search_path of every request --}
       |  , db-schema = "public"
       |  , server-host = "127.0.0.1"
-      |  , server-port = +3000
+      |  , server-port = 3000
       |
-      |  , jwt-secret = ""
-      |  , secret-is-base64 = ""
-      |  , jwt-aud = ""
+      |  , jwt-secret = None Text
+      |  , secret-is-base64 = False
+      |  , jwt-aud = None Text
       |
       |  , db-pool = 10
       |  , db-pool-timeout = 10
-      |  , max-rows = Optional +1000
-      |  , pre-request = ""
+      |  , max-rows = Some 1000
+      |  , pre-request = None Text
       |  , quiet = False
-      |  , app.settings = ""
-      |  , role-claim-key = ""
-      |  , db-extra-search-path = ""
+      |  , app-settings = {=}
+      |  , role-claim-key = None Text
+      |  , db-extra-search-path = ["extensions"]
       |} // {
       |    db-uri = "postgres://user:pass@localhost:5432/dbname"
+      |  , db-schema =  "public"
+      |  , db-anon-role = "user"
+      |  , server-host = "10.132.27.200"
+      |  , server-port = 2222
+      |
+      |    {-- , server-proxy-uri = Optional "http://localhost:8118"  --}
+      |    {-- , jwt-secret = "foo" --}
+      |    {-- , secret-is-base64= True --}
+      |    {-- , jwt-aud = "your_audience_claim"  --}
+      |
+      |    {-- , max-rows = 10000  --}
       |    
-      |## choose a secret, JSON Web Key (or set) to enable JWT auth
-      |## (use "@filename" to load from separate file)
-      |# jwt-secret = "foo"
-      |# secret-is-base64 = false
-      |# jwt-aud = "your_audience_claim"
+      |    {-- , pre-request = "stored_proc_name"  --}
       |
-      |## limit rows in response
-      |# max-rows = 1000
-      |
-      |## stored proc to exec immediately after auth
-      |# pre-request = "stored_proc_name"
-      |
-      |## jspath to the role claim key
-      |# role-claim-key = ".role"
-      |
-      |## extra schemas to add to the search_path of every request
-      |# db-extra-search-path = "extensions, util"
+      |    {-- , role-claim-key = ".role"  --}
+      |    {-- , db-extra-search-path = ["extensions", "util"] --}
+      |  }
       |]
 
 pathParser :: Parser FilePath
@@ -290,3 +292,24 @@ progOpts = info (helper <*> pathParser) $
              text "Example Config File:"
              L.<> nest 2 (hardline L.<> (vsep . map (text . toS) . lines $ exampleCfg))
            )
+
+data AppConfigTest = AppConfigTest {
+    configDatabaseTest          :: Text
+  , configAnonRoleTest          :: Text
+  , configProxyUriTest          :: Maybe Text
+  } deriving (Generic, Show)
+instance Interpret AppConfigTest
+
+exampleCfgTest :: Text
+exampleCfgTest = 
+  [str|{
+      |    configDatabaseTest = "aaa"
+      |  , configAnonRoleTest = "bbb"
+      |  , configPorxyUriTest = Some "CCC"
+      |}
+      |]
+
+repl :: IO ()
+repl = do
+  x <- input auto exampleCfgTest
+  print (x :: AppConfigTest)

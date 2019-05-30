@@ -4,8 +4,15 @@
 # nix-channel --update nixpkgs-static
 # export NIX_PATH=~/.nix-defexpr/channels
 # 0ihr0av55kfg36igb1dn5q132q4gnyaf041xqi4rw7n67525qdap
-{ nixpkgs ? (import <nixpkgs-static> {}).pkgsMusl } :
 # 1472 commit: bcc317db81243dcd5ce488f445e3bb5e9a0fa62e
+{ nixpkgs ? (import <nixpkgs-static> {
+              config.packageOverrides = pkgs: rec {
+                nix = pkgs.nix.overrideDerivation (old: {
+                  doInstallCheck = false ;
+                }) ;
+              } ;
+            }).pkgsMusl} :
+
 with nixpkgs;
 let
   openssl_static = pkgs.openssl.override { static = true; };
@@ -23,6 +30,20 @@ let
           rev = "RELEASE-0.4.0" ;
           sha256 = "0wd67pm1js9ws30zfxhm8s15nc4jb3668z59x2izi7cvckbymwdf" ;
         }) {})) ;
+      repline = dontCheck (doJailbreak (self.callCabal2nix ""
+        (pkgs.fetchFromGitHub {
+          owner = "sdiehl" ;
+          repo = "repline" ;
+          rev = "fde3b24cd91b1039cfd3ee8f389df4c531fa9f77" ;
+          sha256 = "0057jsb7b6p024rns5rs619c7dhnpgjx7s4r4c69zqky0hlf9ss2" ;
+        }) {})) ;
+      dhall = dontCheck (doJailbreak (self.callCabal2nix "Ranged-sets"
+        (pkgs.fetchFromGitHub {
+          owner = "dhall-lang" ;
+          repo = "dhall-haskell" ;
+          rev = "1.23.0" ;
+          sha256 = "0v3sbw1qbx2r06phznw8arjgaf1a8mmkpbl6wkb8pgirwnbwps4j" ;
+        } + /dhall) {})) ;
       hasql-pool = dontCheck super.hasql-pool ;
       postgresql-libpq = super.postgresql-libpq.override { postgresql = postgresql_static; };                                                                          
     } ;

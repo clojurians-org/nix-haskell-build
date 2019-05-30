@@ -23,7 +23,7 @@ Flag CI
   Manual:      True
   Default:     False
 
-executable postgrest-exe
+executable postgrest
   main-is:             Main.hs
   default-extensions:  OverloadedStrings, QuasiQuotes, NoImplicitPrelude
   ghc-options:
