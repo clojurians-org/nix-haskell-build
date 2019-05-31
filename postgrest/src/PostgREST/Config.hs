@@ -1,4 +1,5 @@
 {-# LANGUAGE LambdaCase, TemplateHaskell, DeriveGeneric, FlexibleInstances #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# OPTIONS_GHC -fno-warn-type-defaults #-}
 {-|
 Module      : PostgREST.Config
@@ -29,6 +30,7 @@ import           Control.Monad                (fail)
 import           Control.Lens                 (preview)
 import           Crypto.JWT                   (StringOrURI,
                                                stringOrUri)
+import GHC.Base (id)
 import qualified Data.ByteString              as B
 import qualified Data.ByteString.Char8        as BS
 import qualified Data.CaseInsensitive         as CI
@@ -70,39 +72,82 @@ import Options.Applicative (
   )
 
 import Data.Maybe (fromJust)
-import Dhall
-import Dhall (Interpret(..), Type, input, auto)
+import Dhall (
+    Interpret(..), InterpretOptions(..), Type, input
+  , auto, autoWith, defaultInterpretOptions
+  )
 
 -- | Config file settings for the server
+data AppConfigRaw = AppConfigRaw {
+    raw_configDatabase          :: Text
+  , raw_configAnonRole          :: Text
+  , raw_configProxyUri          :: Maybe Text
+  , raw_configSchema            :: Text
+  , raw_configHost              :: Text
+  , raw_configPort              :: Natural
+
+  , raw_configJwtSecret         :: Maybe Text
+  , raw_configJwtSecretIsBase64 :: Bool
+  , raw_configJwtAudience       :: Maybe Text
+
+  , raw_configPool              :: Natural
+  , raw_configPoolTimeout       :: Natural
+  , raw_configMaxRows           :: Maybe Natural
+  , raw_configReqCheck          :: Maybe Text
+  , raw_configQuiet             :: Bool
+  , raw_configSettings          :: [[Text]]
+  , raw_configRoleClaimKey      :: Maybe Text
+  , raw_configExtraSearchPath   :: [Text]
+  } deriving (Generic, Show)
+instance Interpret AppConfigRaw
+
 data AppConfig = AppConfig {
     configDatabase          :: Text
   , configAnonRole          :: Text
   , configProxyUri          :: Maybe Text
   , configSchema            :: Text
   , configHost              :: Text
-  , configPort              :: Natural
+  , configPort              :: Int
 
-  , configJwtSecret         :: Maybe B.ByteString
+  , configJwtSecret         :: Maybe ByteString
   , configJwtSecretIsBase64 :: Bool
   , configJwtAudience       :: Maybe StringOrURI
 
-  , configPool              :: Natural
-  , configPoolTimeout       :: Natural
+  , configPool              :: Int
+  , configPoolTimeout       :: Int
   , configMaxRows           :: Maybe Integer
   , configReqCheck          :: Maybe Text
   , configQuiet             :: Bool
   , configSettings          :: [(Text, Text)]
   , configRoleClaimKey      :: Either ApiRequestError JSPath
   , configExtraSearchPath   :: [Text]
-  } deriving (Generic, Show)
+  }
 
-instance Interpret AppConfig
-instance Interpret Int where
-  autoWith opt = (fromIntegral::Integer -> Int)  <$> autoWith opt
-instance Interpret B.ByteString where
-  autoWith opt = (toS :: Text -> B.ByteString) <$> autoWith opt
-instance Interpret StringOrURI where
-  autoWith opt = (fromJust . preview stringOrUri :: Text -> StringOrURI) <$> autoWith opt
+mkAppConfig :: AppConfigRaw -> AppConfig
+mkAppConfig AppConfigRaw { .. } = do
+  let configDatabase = raw_configDatabase
+  let configAnonRole = raw_configAnonRole
+  let configProxyUri = raw_configProxyUri
+  let configSchema = raw_configSchema
+  let configHost = raw_configHost
+  let configPort = fromIntegral raw_configPort
+  let configJwtSecret =  toS <$> raw_configJwtSecret
+  let configJwtSecretIsBase64 = raw_configJwtSecretIsBase64
+  let configJwtAudience = raw_configJwtAudience >>=
+                            preview stringOrUri >>= \case 
+                              "" -> Nothing
+                              a -> Just a
+                               
+  let configPool = fromIntegral raw_configPool
+  let configPoolTimeout = fromIntegral raw_configPoolTimeout
+  let configMaxRows = fromIntegral <$> raw_configMaxRows
+  let configReqCheck = raw_configReqCheck
+  let configQuiet = raw_configQuiet
+  let configSettings = map (\(k:v:[]) -> (k,v)) raw_configSettings
+  let configRoleClaimKey = maybe (Right [JSPKey "role"]) pRoleClaimKey raw_configRoleClaimKey
+  let configExtraSearchPath = raw_configExtraSearchPath
+  AppConfig { .. }
+
 instance Interpret (Either ApiRequestError JSPath) where
   autoWith opt = (pRoleClaimKey :: Text -> Either ApiRequestError JSPath) <$> autoWith opt
 
@@ -148,7 +193,7 @@ readOptions :: IO AppConfig
 readOptions = do
   -- First read the config file path from command line
   cfgPath <- customExecParser (prefs showHelpOnError) progOpts
-  input auto (toS cfgPath)
+  mkAppConfig <$> input (autoWith defaultInterpretOptions {fieldModifier = configFM}) (toS cfgPath)
 
 -- | Function to read and parse options from the command line
 --readOptions :: IO AppConfig
@@ -250,27 +295,28 @@ exampleCfg =
       |  , max-rows = Some 1000
       |  , pre-request = None Text
       |  , quiet = False
-      |  , app-settings = {=}
+      |  , app-settings = [] : List (List Text)
       |  , role-claim-key = None Text
       |  , db-extra-search-path = ["extensions"]
       |} // {
       |    db-uri = "postgres://user:pass@localhost:5432/dbname"
       |  , db-schema =  "public"
       |  , db-anon-role = "user"
-      |  , server-host = "10.132.27.200"
+      |  , server-host = "192.168.1.1"
       |  , server-port = 2222
+      |  {--
+      |  , server-proxy-uri = Optional "http://localhost:8118" 
+      |  , jwt-secret = "foo"
+      |  , secret-is-base64= True 
+      |  , jwt-aud = "your_audience_claim" 
       |
-      |    {-- , server-proxy-uri = Optional "http://localhost:8118"  --}
-      |    {-- , jwt-secret = "foo" --}
-      |    {-- , secret-is-base64= True --}
-      |    {-- , jwt-aud = "your_audience_claim"  --}
+      |  , max-rows = 10000 
+      |  
+      |  , pre-request = "stored_proc_name"
       |
-      |    {-- , max-rows = 10000  --}
-      |    
-      |    {-- , pre-request = "stored_proc_name"  --}
-      |
-      |    {-- , role-claim-key = ".role"  --}
-      |    {-- , db-extra-search-path = ["extensions", "util"] --}
+      |  , role-claim-key = ".role" 
+      |  , db-extra-search-path = ["extensions", "util"]
+      |  --}
       |  }
       |]
 
@@ -293,23 +339,28 @@ progOpts = info (helper <*> pathParser) $
              L.<> nest 2 (hardline L.<> (vsep . map (text . toS) . lines $ exampleCfg))
            )
 
-data AppConfigTest = AppConfigTest {
-    configDatabaseTest          :: Text
-  , configAnonRoleTest          :: Text
-  , configProxyUriTest          :: Maybe Text
-  } deriving (Generic, Show)
-instance Interpret AppConfigTest
-
-exampleCfgTest :: Text
-exampleCfgTest = 
-  [str|{
-      |    configDatabaseTest = "aaa"
-      |  , configAnonRoleTest = "bbb"
-      |  , configPorxyUriTest = Some "CCC"
-      |}
-      |]
+configFM :: Text -> Text
+configFM = \case
+  "raw_configDatabase" -> "db-uri"
+  "raw_configAnonRole" -> "db-anon-role"
+  "raw_configProxyUri" -> "server-proxy-uri"
+  "raw_configSchema" -> "db-schema"
+  "raw_configHost" -> "server-host"
+  "raw_configPort" -> "server-port"
+  "raw_configJwtSecret" -> "jwt-secret"
+  "raw_configJwtSecretIsBase64" -> "secret-is-base64"
+  "raw_configJwtAudience" -> "jwt-aud"
+  "raw_configPool" -> "db-pool"
+  "raw_configPoolTimeout" -> "db-pool-timeout"
+  "raw_configMaxRows" -> "max-rows"
+  "raw_configReqCheck" -> "pre-request"
+  "raw_configQuiet" -> "quiet"
+  "raw_configSettings" -> "app-settings"
+  "raw_configRoleClaimKey" -> "role-claim-key"
+  "raw_configExtraSearchPath" -> "db-extra-search-path"
+  a -> a
 
 repl :: IO ()
 repl = do
-  x <- input auto exampleCfgTest
-  print (x :: AppConfigTest)
+  x <- input (autoWith defaultInterpretOptions {fieldModifier = configFM}) exampleCfg
+  print (x :: AppConfigRaw)
